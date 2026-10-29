@@ -46,7 +46,7 @@ Most loan-default projects stop at a notebook and a single accuracy number. This
 
 > Fill these in only with numbers you measured on the held-out **test set**, and note the command or notebook for each.
 
-**Dataset:** _TODO: name (e.g. Home Credit Default Risk), number of rows, default rate_
+**Dataset:** _TODO: Home Credit Default Risk, number of rows, default rate_
 
 | Model | ROC-AUC | PR-AUC | KS | Notes |
 |---|---|---|---|---|
@@ -92,8 +92,8 @@ flowchart LR
 
 ```bash
 # 1. Clone
-git clone https://github.com/Prathamesh625/explainable-credit-risk.git
-cd explainable-credit-risk
+git clone https://github.com/Prathamesh625/creditlens.git
+cd creditlens
 
 # 2. Get the data (see data/README.md for the download link and licence)
 #    Place the files in data/raw/
