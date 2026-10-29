@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Credit Risk Scoring</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f6f7fb; --card:#fff; --text:#1c2333; --muted:#667085; --line:#e4e7ec; --accent:#3b5bdb; --low:#2f9e44; --med:#f08c00; --high:#e03131; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1420; --card:#171d2c; --text:#e8ebf3; --muted:#98a2b3; --line:#2a3246; --accent:#748ffc; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:24px 20px 8px; max-width:1000px; margin:auto; }
+  h1 { margin:0 0 4px; font-size:1.5rem; }
+  .sub { color:var(--muted); font-size:.9rem; }
+  main { max-width:1000px; margin:auto; padding:16px 20px 40px; display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:760px){ main{grid-template-columns:1fr;} }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; }
+  label { display:block; font-size:.8rem; color:var(--muted); margin:10px 0 4px; }
+  input, select { width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); font-size:.95rem; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  button { margin-top:16px; width:100%; padding:11px; border:0; border-radius:8px; background:var(--accent); color:#fff; font-weight:600; font-size:1rem; cursor:pointer; }
+  .score { font-size:2.6rem; font-weight:700; margin:4px 0; }
+  .badge { display:inline-block; padding:3px 12px; border-radius:99px; color:#fff; font-weight:600; font-size:.85rem; }
+  .low{background:var(--low)} .medium{background:var(--med)} .high{background:var(--high)}
+  .reason { padding:8px 0; border-top:1px solid var(--line); font-size:.9rem; }
+  .muted { color:var(--muted); font-size:.8rem; }
+  .err { color:var(--high); margin-top:10px; font-size:.9rem; }
+  .note { grid-column:1/-1; font-size:.8rem; color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Credit Risk Scoring</h1>
+  <div class="sub">Default probability with the top reasons behind it (SHAP). Learning project, not for real lending decisions.</div>
+</header>
+<main>
+  <section class="card">
+    <h3 style="margin-top:0">Applicant</h3>
+    <div class="row">
+      <div><label>Age</label><input id="age" type="number" value="34"></div>
+      <div><label>Home ownership</label>
+        <select id="home_ownership"><option>RENT</option><option>OWN</option><option>MORTGAGE</option></select></div>
+      <div><label>Annual income</label><input id="income" type="number" value="52000"></div>
+      <div><label>Loan amount</label><input id="loan_amount" type="number" value="15000"></div>
+      <div><label>Years employed</label><input id="employment_years" type="number" step="0.5" value="6"></div>
+      <div><label>Credit history (years)</label><input id="credit_history_length" type="number" step="0.5" value="8"></div>
+      <div><label>Open accounts</label><input id="num_open_accounts" type="number" value="4"></div>
+      <div><label>Late payments</label><input id="num_late_payments" type="number" value="1"></div>
+      <div><label>Debt-to-income ratio</label><input id="debt_to_income" type="number" step="0.01" value="0.29"></div>
+    </div>
+    <button id="go">Score applicant</button>
+    <div id="err" class="err"></div>
+  </section>
+
+  <section class="card" id="out" hidden>
+    <h3 style="margin-top:0">Result</h3>
+    <div class="score" id="prob"></div>
+    <span id="band" class="badge"></span>
+    <div class="muted" style="margin-top:8px" id="meta"></div>
+    <canvas id="chart" height="170" style="margin-top:14px"></canvas>
+    <div id="reasons"></div>
+  </section>
+  <div class="note">Positive bars raise the predicted risk, negative bars lower it.</div>
+</main>
+<script>
+const NUM = ["age","income","loan_amount","employment_years","credit_history_length","num_open_accounts","num_late_payments","debt_to_income"];
+let chart;
+document.getElementById("go").addEventListener("click", async () => {
+  const body = { home_ownership: document.getElementById("home_ownership").value };
+  NUM.forEach(k => body[k] = Number(document.getElementById(k).value));
+  const err = document.getElementById("err"); err.textContent = "";
+  try {
+    const r = await fetch("/predict", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
+    const data = await r.json();
+    if (!r.ok) { err.textContent = "Invalid input: " + (data.detail?.map(d => d.loc.slice(-1)[0] + " " + d.msg).join("; ") || r.status); return; }
+    show(data);
+  } catch (e) { err.textContent = "Request failed: " + e.message; }
+});
+function show(d) {
+  document.getElementById("out").hidden = false;
+  document.getElementById("prob").textContent = (d.default_probability * 100).toFixed(1) + "%";
+  const b = document.getElementById("band"); b.textContent = d.risk_band.toUpperCase() + " RISK"; b.className = "badge " + d.risk_band;
+  document.getElementById("meta").textContent = "Prediction #" + d.prediction_id + " | model v" + d.model_version;
+  const labels = d.top_reasons.map(r => r.label), vals = d.top_reasons.map(r => r.impact);
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById("chart"), {
+    type: "bar",
+    data: { labels, datasets: [{ data: vals, backgroundColor: vals.map(v => v > 0 ? "#e03131" : "#2f9e44") }] },
+    options: { indexAxis: "y", plugins: { legend: { display: false } }, scales: { x: { title: { display: true, text: "Impact on risk (log-odds)" } } } }
+  });
+  document.getElementById("reasons").innerHTML = d.top_reasons.map(r =>
+    `<div class="reason"><b>${r.label}</b> = ${r.value}<br><span class="muted">${r.direction} (${r.impact > 0 ? "+" : ""}${r.impact})</span></div>`).join("");
+}
+</script>
+</body>
+</html>
