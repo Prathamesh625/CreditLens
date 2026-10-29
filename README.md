@@ -1,6 +1,6 @@
 <div align="center">
 
-# 📉 CreditLens - 
+# 📉 CreditLens - Credit Risk Scoring Service
 
 **Loan default prediction with a reason for every decision: a scikit-learn / LightGBM model served through FastAPI, with SHAP explanations and a live dashboard.**
 
