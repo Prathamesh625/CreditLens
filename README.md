@@ -94,8 +94,8 @@ flowchart LR
 
 ```bash
 # 1. Clone
-git clone https://github.com/Prathamesh625/explainable-credit-risk.git
-cd explainable-credit-risk
+git clone https://github.com/Prathamesh625/creditlens.git
+cd creditlens
 
 # 2. Install and train (uses synthetic data by default, no download needed)
 pip install -r requirements-dev.txt
