@@ -1,6 +1,6 @@
 <div align="center">
 
-# 📉 explainable-credit-risk
+# CreditLens - Credit Risk Scoring Service
 
 **Loan default prediction with a reason for every decision: a scikit-learn / LightGBM model served through FastAPI, with SHAP explanations and a live dashboard.**
 
@@ -207,15 +207,6 @@ creditlens/
 └── .github/workflows/ci.yml
 ```
 
-## ⚠️ Limitations
-
-Be upfront about these. It shows engineering maturity.
-
-- Trained on a **public dataset**, so real-world performance would differ.
-- SHAP shows what the model used, **not causation**.
-- Fairness checks cover only the attributes available in the data.
-- No drift monitoring or automated retraining yet.
-- Not suitable for real lending decisions.
 
 ## 🐞 Problems I faced
 
