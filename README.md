@@ -1,6 +1,6 @@
 <div align="center">
 
-# 📉 CreditLens - Credit Risk Scoring Service
+# 📉 explainable-credit-risk
 
 **Loan default prediction with a reason for every decision: a scikit-learn / LightGBM model served through FastAPI, with SHAP explanations and a live dashboard.**
 
@@ -16,6 +16,7 @@
 
 </div>
 
+> ⚠️ **Learning project.** Built on a public dataset to demonstrate an end-to-end ML workflow. It is not a real credit decisioning system and must not be used to make real lending decisions.
 
 ---
 
@@ -44,21 +45,23 @@ Most loan-default projects stop at a notebook and a single accuracy number. This
 
 ## 📊 Results
 
-> Fill these in only with numbers you measured on the held-out **test set**, and note the command or notebook for each.
+Measured on the **held-out test set** (20% of the data, never used for tuning), seed 42.
 
-**Dataset:** _TODO: Home Credit Default Risk, number of rows, default rate_
 
-| Model | ROC-AUC | PR-AUC | KS | Notes |
-|---|---|---|---|---|
-| Logistic regression (baseline) | _TODO_ | _TODO_ | _TODO_ | Scaled, class-weighted |
-| LightGBM (final) | _TODO_ | _TODO_ | _TODO_ | Tuned with cross-validation |
+| Model | ROC-AUC | PR-AUC | KS |
+|---|---|---|---|
+| Logistic regression (baseline) | 0.8433 | 0.5885 | 0.5363 |
+| LightGBM (served model) | 0.8442 | 0.5786 | 0.5515 |
+
+LightGBM is only marginally better than the baseline here, which is an honest result: the baseline is strong on this data, and the synthetic data has limited non-linearity.
 
 | Serving metric | Result | How measured |
 |---|---|---|
-| `/predict` p95 latency | _TODO_ | Locust, _N_ users |
-| Test count / coverage | _TODO_ | `pytest --cov` |
+| `/predict` latency | p50 12 ms, p95 16 ms | 200 sequential requests, local, single process, SQLite |
+| Tests | 10 passing, 93% coverage | `pytest --cov=src --cov=app` |
+| Fairness | approval-rate gap: gender 0.7 pts, age band 9.0 pts | `models/fairness.json` (threshold 0.25) |
 
-**Top global drivers (SHAP):** _TODO: paste your top 5 features and a one-line interpretation_
+Re-measure all of these on your own machine before quoting them anywhere.
 
 ## 🧱 Architecture
 
@@ -80,7 +83,6 @@ flowchart LR
 | Layer | Tools |
 |---|---|
 | Data and ML | Python, pandas, NumPy, scikit-learn, LightGBM, SHAP |
-| Experiment tracking | MLflow (optional) |
 | API | FastAPI, Pydantic |
 | Storage | PostgreSQL, SQLAlchemy |
 | Frontend | HTML, CSS, JavaScript, Chart.js |
@@ -88,21 +90,25 @@ flowchart LR
 
 ## 🚀 Quick start
 
-**Prerequisites:** Docker and Docker Compose (or Python 3.12 for local runs)
+**Prerequisites:** Python 3.12, or Docker and Docker Compose
 
 ```bash
 # 1. Clone
-git clone https://github.com/Prathamesh625/creditlens.git
-cd creditlens
+git clone https://github.com/Prathamesh625/explainable-credit-risk.git
+cd explainable-credit-risk
 
-# 2. Get the data (see data/README.md for the download link and licence)
-#    Place the files in data/raw/
+# 2. Install and train (uses synthetic data by default, no download needed)
+pip install -r requirements-dev.txt
+python -m src.train
 
-# 3. Train the model
-python -m src.train --seed 42
+# 3a. Run locally (SQLite)
+uvicorn app.main:app --reload
 
-# 4. Start the API and database
+# 3b. ...or run with Docker (PostgreSQL + API)
 docker compose up --build
+
+# 4. Test
+pytest --cov=src --cov=app
 ```
 
 - API docs (Swagger): http://localhost:8000/docs
@@ -122,44 +128,47 @@ docker compose up --build
 ```bash
 curl -X POST http://localhost:8000/predict \
   -H "Content-Type: application/json" \
-  -d '{"age": 34, "income": 52000, "loan_amount": 15000, "employment_years": 6, "credit_history_length": 8}'
+  -d '{"age":34,"income":52000,"loan_amount":15000,"employment_years":6,"credit_history_length":8,"num_open_accounts":4,"num_late_payments":1,"debt_to_income":0.29,"home_ownership":"RENT"}'
 ```
 
-**Example response** _(illustrative: replace with a real response from your model)_
+**Example response** (real output from the synthetic-data model)
 
 ```json
 {
-  "prediction_id": 1042,
-  "default_probability": 0.18,
-  "risk_band": "medium",
+  "prediction_id": 1,
+  "default_probability": 0.0999,
+  "risk_band": "low",
   "top_reasons": [
-    {"feature": "loan_amount", "impact": "+0.07"},
-    {"feature": "credit_history_length", "impact": "-0.05"},
-    {"feature": "income", "impact": "-0.03"}
+    {"feature": "debt_to_income", "label": "Debt-to-income ratio", "value": 0.29, "impact": -0.8426, "direction": "decreases risk"},
+    {"feature": "home_ownership", "label": "Home ownership", "value": "RENT", "impact": 0.2326, "direction": "increases risk"},
+    {"feature": "loan_amount", "label": "Loan amount", "value": 15000.0, "impact": -0.2144, "direction": "decreases risk"}
   ],
-  "model_version": "v1.0.0"
+  "model_version": "1.0.0"
 }
 ```
+
+`impact` is the SHAP value in log-odds: positive raises predicted risk, negative lowers it.
 
 ## 🔬 Methodology
 
 **1. Data analysis (pandas)**
-Missing values, outliers, class balance, feature distributions and correlations. Charts are in `notebooks/01_eda.ipynb`.
+Missing values, outliers, class balance, distributions, correlations and a single-feature leakage check are in `notebooks/01_eda.ipynb`.
+Findings on the synthetic data: no missing values, a 21.6% default rate, and risk rises sharply once debt-to-income passes 0.8 (about 10% default below it, about 31% just above, 45% above 1.0). Renters default more often (26.5%) than owners (15.0%), and default rate climbs with late payments (15% with none, about 40% with three). These patterns are why a tree model and SHAP are worth comparing against a linear baseline.
 
 **2. Avoiding data leakage**
-Preprocessing is fit only on the training split and wrapped in a scikit-learn `Pipeline`. Features that would not exist at application time are removed. _TODO: list which columns you dropped and why._
+Preprocessing (imputation, scaling, encoding) is fit on the training split only. The validation set is used for early stopping, and the test set is used once for the final report. The sensitive attribute `gender` is excluded from the model features and used only in the fairness audit.
 
 **3. Handling imbalance**
-Class weights were used, and metrics focus on PR-AUC and KS rather than accuracy. _TODO: note anything else you tried (e.g. SMOTE) and what happened._
+Metrics focus on PR-AUC and KS rather than accuracy. The baseline uses class weights. For LightGBM I first tried `scale_pos_weight` (ROC-AUC 0.838, PR-AUC 0.563 on the test set), then removed it and lowered `num_leaves` to 15 with a learning rate of 0.05, which gave 0.844 and 0.579. I changed those settings together, so I can't attribute the gain to one of them. I did not try SMOTE.
 
 **4. Model comparison**
-A logistic regression baseline was trained first, then LightGBM. The final model is only used if it beats the baseline on the validation set, and the comparison is reported on the untouched test set.
+A logistic regression baseline is trained first, then LightGBM with early stopping. Both are reported side by side. LightGBM is the served model because SHAP's `TreeExplainer` gives exact per-prediction attributions for tree models.
 
 **5. Explainability**
 SHAP values give each prediction its top drivers, and global SHAP plots show what the model relies on overall.
 
 **6. Fairness check**
-Approval rate and error rates (false positive and false negative) are compared across groups such as age band or gender, where the dataset provides them. _TODO: summarise what you found._
+Approval rate and error rates are compared across gender and age band at a 0.25 decision threshold (`models/fairness.json`). On the synthetic data the gender gap is under 1 point and the age-band gap is about 9 points. On a real dataset I would first check whether the age-band gap reflects genuine differences in default rates or acts as a proxy for something else, since the model never sees gender or age bands directly but can learn correlated features (here, employment and credit-history length are capped by age). I would also compare false-positive and false-negative rates, not just approval rates, test other thresholds, and confirm which attributes may legally be used in the target market.
 
 ## 🧪 Testing
 
@@ -177,18 +186,25 @@ pytest --cov=src --cov=app
 ## 🗂️ Project structure
 
 ```
-explainable-credit-risk/
-├── app/              # FastAPI app, routes, schemas, DB models
-│   └── static/       # dashboard HTML/CSS/JS (Chart.js)
-├── src/              # training, features, evaluation, explain
-├── notebooks/        # EDA and model comparison
-├── models/           # versioned model artifacts
-├── data/             # raw/ and processed/ (not committed)
-├── tests/
-├── docker-compose.yml
-├── Dockerfile
-├── requirements.txt
-└── README.md
+creditlens/
+├── app/                 # FastAPI app
+│   ├── main.py          # routes
+│   ├── schemas.py       # Pydantic validation
+│   ├── db.py            # SQLAlchemy audit table
+│   └── static/index.html  # dashboard (Chart.js)
+├── src/
+│   ├── config.py        # features, thresholds
+│   ├── data.py          # synthetic generator + loader
+│   ├── train.py         # baseline vs LightGBM, saves artifacts
+│   ├── metrics.py       # ROC-AUC, PR-AUC, KS
+│   ├── fairness.py      # group audit
+│   └── scoring.py       # prediction + SHAP reasons
+├── tests/               # API, training, metrics tests
+├── notebooks/01_eda.ipynb  # exploratory analysis
+├── data/                # raw/ (not committed), README.md
+├── models/              # trained artifacts (not committed)
+├── Dockerfile, docker-compose.yml, requirements*.txt
+└── .github/workflows/ci.yml
 ```
 
 ## ⚠️ Limitations
@@ -212,7 +228,7 @@ Be upfront about these. It shows engineering maturity.
 
 - [ ] Probability calibration
 - [ ] Drift detection (PSI) and a retraining trigger
-- [ ] Model registry with MLflow
+- [ ] Experiment tracking and a model registry (MLflow)
 - [ ] Batch scoring endpoint
 
 ## 📄 License
